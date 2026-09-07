@@ -1,4 +1,4 @@
-package com.observability.sfdc.config
+package com.observability.sfdc.util
 
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
