@@ -1,5 +1,6 @@
 package com.observability.sfdc.config
 
+import com.observability.sfdc.util.ApiKeyAuthFilter
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test

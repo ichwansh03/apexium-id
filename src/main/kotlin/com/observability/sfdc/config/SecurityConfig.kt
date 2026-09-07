@@ -1,6 +1,7 @@
 package com.observability.sfdc.config
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.observability.sfdc.util.ApiKeyAuthFilter
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -28,7 +29,7 @@ class SecurityConfig(
         val objectMapper = ObjectMapper()
 
         http
-            .csrf { it.disable() }
+            .csrf { }
             .sessionManagement { it.sessionCreationPolicy(SessionCreationPolicy.STATELESS) }
             .cors { }
             .authorizeHttpRequests { auth ->
