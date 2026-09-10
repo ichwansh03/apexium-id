@@ -8,6 +8,7 @@ import com.observability.sfdc.dto.SalesforceCreateResponse
 import com.observability.sfdc.dto.TraceFlagDto
 import com.observability.sfdc.repository.LogRepository
 import com.observability.sfdc.service.ApexLogService
+import com.observability.sfdc.service.OrgContextService
 import com.observability.sfdc.service.TraceFlagService
 import com.observability.sfdc.service.impl.TraceJobService
 import io.swagger.v3.oas.annotations.Operation
@@ -27,7 +28,8 @@ class SalesforceLogController(
     private val apexLogService: ApexLogService,
     private val traceFlagService: TraceFlagService,
     private val logRepository: LogRepository,
-    private val traceJobService: TraceJobService
+    private val traceJobService: TraceJobService,
+    private val orgContextService: OrgContextService
 ) {
 
     @GetMapping
@@ -49,14 +51,15 @@ class SalesforceLogController(
         @RequestParam(defaultValue = "0") page: Int
     ): List<Log> {
         val pageable = PageRequest.of(page, size, Sort.by("requestTime").descending())
+        val orgId = orgContextService.getActiveOrgId()
         return when {
             !className.isNullOrBlank() && !author.isNullOrBlank() ->
-                logRepository.findByApexClassNameContainingIgnoreCaseAndAuthorNameContainingIgnoreCase(className, author, pageable)
+                logRepository.findByOrgIdAndApexClassNameContainingIgnoreCaseAndAuthorNameContainingIgnoreCase(orgId, className, author, pageable)
             !className.isNullOrBlank() ->
-                logRepository.findByApexClassNameContainingIgnoreCase(className, pageable)
+                logRepository.findByOrgIdAndApexClassNameContainingIgnoreCase(orgId, className, pageable)
             !author.isNullOrBlank() ->
-                logRepository.findByAuthorNameContainingIgnoreCase(author, pageable)
-            else -> logRepository.findAllByOrderByRequestTimeDesc(pageable)
+                logRepository.findByOrgIdAndAuthorNameContainingIgnoreCase(orgId, author, pageable)
+            else -> logRepository.findAllByOrgIdOrderByRequestTimeDesc(orgId, pageable)
         }
     }
 

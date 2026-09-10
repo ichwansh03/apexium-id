@@ -8,7 +8,8 @@ import java.util.*
 
 @Repository
 interface UserRepository : JpaRepository<User, Long> {
-    fun findBySfdcId(sfdcId: String): Optional<User>
-    fun findByNameContainingIgnoreCase(name: String, pageable: Pageable): List<User>
-    fun findAllProjectedBy(pageable: Pageable): List<User>
+    fun findByOrgIdAndSfdcId(orgId: String, sfdcId: String): Optional<User>
+    fun findByOrgIdAndNameContainingIgnoreCase(orgId: String, name: String, pageable: Pageable): List<User>
+    fun findAllByOrgId(orgId: String, pageable: Pageable): List<User>
+    fun countByOrgId(orgId: String): Long
 }

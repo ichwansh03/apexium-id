@@ -8,7 +8,8 @@ import java.util.*
 
 @Repository
 interface ApexClassRepository : JpaRepository<ApexClass, Long> {
-    fun findBySfdcId(sfdcId: String): Optional<ApexClass>
-    fun findByNameContainingIgnoreCase(name: String, pageable: Pageable): List<ApexClass>
-    fun findAllProjectedBy(pageable: Pageable): List<ApexClass>
+    fun findByOrgIdAndSfdcId(orgId: String, sfdcId: String): Optional<ApexClass>
+    fun findByOrgIdAndNameContainingIgnoreCase(orgId: String, name: String, pageable: Pageable): List<ApexClass>
+    fun findAllByOrgId(orgId: String, pageable: Pageable): List<ApexClass>
+    fun countByOrgId(orgId: String): Long
 }

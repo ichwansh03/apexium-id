@@ -1,6 +1,7 @@
 package com.observability.sfdc.service.impl
 
 import com.observability.sfdc.repository.LogRepository
+import com.observability.sfdc.service.OrgContextService
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.scheduling.annotation.Scheduled
@@ -11,6 +12,7 @@ import java.time.Instant
 @Service
 class LogRetentionService(
     private val logRepository: LogRepository,
+    private val orgContextService: OrgContextService,
     @Value($$"${log.retention.days}") private val retentionDays: Long
 ) {
     private val logger = LoggerFactory.getLogger(LogRetentionService::class.java)
@@ -18,9 +20,11 @@ class LogRetentionService(
     @Scheduled(cron = $$"${log.retention.cron}")
     @Transactional
     fun purgeOldLogs() {
+        val orgId = orgContextService.getActiveOrgId()
+        if (orgId == "UNKNOWN_ORG") return
         val cutoff = Instant.now().minusSeconds(retentionDays * 86400)
         logger.info("Starting log retention purge: removing logs older than $retentionDays days (before $cutoff)...")
-        val deleted = logRepository.deleteByRequestTimeBefore(cutoff)
+        val deleted = logRepository.deleteByOrgIdAndRequestTimeBefore(orgId, cutoff)
         logger.info("Log retention purge complete: $deleted logs deleted.")
     }
 }

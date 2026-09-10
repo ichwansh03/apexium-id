@@ -5,6 +5,7 @@ import java.time.Instant
 
 @Entity
 @Table(name = "logs", indexes = [
+    Index(name = "idx_logs_org_id", columnList = "org_id"),
     Index(name = "idx_logs_apex_class_name", columnList = "apex_class_name"),
     Index(name = "idx_logs_author_name", columnList = "author_name"),
     Index(name = "idx_logs_request_time", columnList = "request_time")
@@ -13,6 +14,9 @@ data class Log(
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null,
+
+    @Column(name = "org_id", nullable = true, columnDefinition = "VARCHAR(18) DEFAULT 'UNKNOWN'")
+    val orgId: String?,
 
     @Column(name = "sfdc_id", unique = true)
     val sfdcId: String,

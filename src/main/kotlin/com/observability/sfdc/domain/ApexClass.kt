@@ -9,6 +9,9 @@ data class ApexClass(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null,
 
+    @Column(name = "org_id", nullable = true, columnDefinition = "VARCHAR(18) DEFAULT 'UNKNOWN'")
+    val orgId: String?,
+
     @Column(name = "sfdc_id", unique = true)
     val sfdcId: String,
 

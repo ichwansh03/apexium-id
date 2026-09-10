@@ -21,4 +21,12 @@ data class SalesforceTokenResponse(
     
     @JsonProperty("signature")
     val signature: String? = null
-)
+) {
+    val orgId: String?
+        get() = try {
+            id?.let {
+                val path = it.substringAfter("/id/")
+                path.substringBefore("/")
+            }
+        } catch (_: Exception) { null }
+}

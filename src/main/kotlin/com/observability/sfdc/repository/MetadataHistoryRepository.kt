@@ -6,5 +6,5 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface MetadataHistoryRepository : JpaRepository<MetadataHistory, Long> {
-    fun findBySfdcIdAndEntityTypeOrderByCreatedAtDesc(sfdcId: String, entityType: String): List<MetadataHistory>
+    fun findByOrgIdAndSfdcIdAndEntityTypeOrderByCreatedAtDesc(orgId: String, sfdcId: String, entityType: String): List<MetadataHistory>
 }

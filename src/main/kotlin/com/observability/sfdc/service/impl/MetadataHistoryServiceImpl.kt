@@ -5,20 +5,23 @@ import com.observability.sfdc.dto.MetadataHistoryDto
 import com.observability.sfdc.exception.ResourceNotFoundException
 import com.observability.sfdc.repository.MetadataHistoryRepository
 import com.observability.sfdc.service.MetadataHistoryService
+import com.observability.sfdc.service.OrgContextService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
 @Service
 class MetadataHistoryServiceImpl(
     private val historyRepository: MetadataHistoryRepository,
-    private val minioService: MinioService
+    private val minioService: MinioService,
+    private val orgContextService: OrgContextService
 ) : MetadataHistoryService {
 
     private val logger = LoggerFactory.getLogger(MetadataHistoryServiceImpl::class.java)
 
     override fun getHistory(entityType: String, sfdcId: String): List<MetadataHistoryDto> {
         validateEntityType(entityType)
-        return historyRepository.findBySfdcIdAndEntityTypeOrderByCreatedAtDesc(sfdcId, entityType)
+        val orgId = orgContextService.getActiveOrgId()
+        return historyRepository.findByOrgIdAndSfdcIdAndEntityTypeOrderByCreatedAtDesc(orgId, sfdcId, entityType)
             .map { entity ->
                 MetadataHistoryDto(
                     id = entity.id,

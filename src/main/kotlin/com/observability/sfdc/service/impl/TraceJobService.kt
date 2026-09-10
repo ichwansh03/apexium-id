@@ -7,6 +7,7 @@ import com.observability.sfdc.exception.ConflictException
 import com.observability.sfdc.exception.ResourceNotFoundException
 import com.observability.sfdc.exception.ValidationException
 import com.observability.sfdc.repository.TraceJobRepository
+import com.observability.sfdc.service.OrgContextService
 import com.observability.sfdc.service.TraceFlagService
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
@@ -20,11 +21,14 @@ import java.time.format.DateTimeFormatter
 @Service
 class TraceJobService(
     private val traceJobRepository: TraceJobRepository,
-    private val traceFlagService: TraceFlagService
+    private val traceFlagService: TraceFlagService,
+    private val orgContextService: OrgContextService
 ) {
     private val logger = LoggerFactory.getLogger(TraceJobService::class.java)
     private val sfdcFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
     private val sfdcWithOffsetFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
+
+    private fun currentOrgId(): String = orgContextService.getActiveOrgId()
 
     @Transactional
     fun createJob(request: FrontendTraceFlagRequest): TraceJob {
@@ -39,6 +43,7 @@ class TraceJobService(
             .plus(Duration.ofMinutes((request.durationMinutes ?: 0).toLong()))
         
         val job = TraceJob(
+            orgId = currentOrgId(),
             tracedEntityId = request.tracedEntityId,
             tracedEntityName = request.tracedEntityName,
             tracedEntityType = request.entityType ?: "User",
@@ -56,9 +61,14 @@ class TraceJobService(
         return savedJob
     }
 
-    fun getAllJobs(): List<TraceJob> = traceJobRepository.findAll()
+    fun getAllJobs(): List<TraceJob> {
+        val orgId = currentOrgId()
+        return traceJobRepository.findAll().filter { it.orgId == orgId }
+    }
 
-    fun searchJobsByName(name: String): List<TraceJob> = traceJobRepository.findByTracedEntityNameContainingIgnoreCase(name)
+    fun searchJobsByName(name: String): List<TraceJob> {
+        return traceJobRepository.findByOrgIdAndTracedEntityNameContainingIgnoreCase(currentOrgId(), name)
+    }
 
     @Transactional
     fun cancelJob(id: Long) {
@@ -117,6 +127,7 @@ class TraceJobService(
 
     @Transactional
     fun adoptExistingTraceFlag(traceFlag: TraceFlagDto): TraceJob {
+        val orgId = currentOrgId()
         // Check if this SFDC TraceFlag is already managed by a local job
         val existingJob = traceJobRepository.findAll().find { it.sfdcTraceFlagId == traceFlag.id }
         if (existingJob != null) {
@@ -136,6 +147,7 @@ class TraceJobService(
         }
 
         val job = TraceJob(
+            orgId = orgId,
             tracedEntityId = traceFlag.tracedEntityId,
             tracedEntityName = traceFlag.tracedEntity?.name,
             tracedEntityType = traceFlag.tracedEntity?.attributes?.type ?: "User",

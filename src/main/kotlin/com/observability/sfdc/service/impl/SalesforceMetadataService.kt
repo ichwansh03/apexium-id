@@ -17,6 +17,7 @@ import com.observability.sfdc.service.ApexClassMetadataService
 import com.observability.sfdc.service.ApexTriggerMetadataService
 import com.observability.sfdc.service.DebugLevelMetadataService
 import com.observability.sfdc.service.MetadataDetailService
+import com.observability.sfdc.service.OrgContextService
 import com.observability.sfdc.service.ReportMetadataService
 import com.observability.sfdc.util.ReportToSoqlConverter
 import com.observability.sfdc.service.SalesforceBaseService
@@ -43,11 +44,14 @@ class SalesforceMetadataService(
     private val reportRepository: ReportRepository,
     private val reportToSoqlConverter: ReportToSoqlConverter,
     private val minioService: MinioService,
+    private val orgContextService: OrgContextService,
     @Value($$"${salesforce.api-version}") apiVersion: String
     ) : SalesforceBaseService(authService, apiVersion), ApexClassMetadataService, ApexTriggerMetadataService, DebugLevelMetadataService, ReportMetadataService, MetadataDetailService {
 
     private val salesforceIdPattern = Regex("^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$")
     private val sfdcDateFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME
+
+    private fun currentOrgId(): String = orgContextService.getActiveOrgId()
 
     private fun parseSfdcDate(dateStr: String?): Instant? {
         if (dateStr.isNullOrBlank()) return null
@@ -89,7 +93,11 @@ class SalesforceMetadataService(
         }
     }
 
-    @Cacheable(value = ["sf_metadata"], key = "'debug_levels_' + (#name ?: 'all') + '_' + #limit + '_' + #offset", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_metadata"],
+        key = "@orgContextService.getActiveOrgId() + ':debug_levels:' + (#name ?: 'all') + ':' + #limit + ':' + #offset",
+        unless = "#result == null"
+    )
     @Transactional
     override fun getAllDebugLevels(name: String?, limit: Int, offset: Int): List<DebugLevelDto> {
         var query = "SELECT Id, DeveloperName, MasterLabel, ApexCode, ApexProfiling, Callout, Database, System, Validation, Visualforce, Workflow FROM DebugLevel "
@@ -137,13 +145,25 @@ class SalesforceMetadataService(
         return records
     }
 
-    @Cacheable(value = ["sf_metadata"], key = "'apex_classes_' + (#name ?: 'all') + '_' + #limit + '_' + #offset", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_metadata"],
+        key = "@orgContextService.getActiveOrgId() + ':apex_classes:' + (#name ?: 'all') + ':' + #limit + ':' + #offset",
+        unless = "#result == null"
+    )
     override fun getAllApexClasses(name: String?, limit: Int, offset: Int): List<ApexClassDto> = fetchApexClassesFromSalesforce(name, limit, offset)
 
-    @Cacheable(value = ["sf_metadata"], key = "'apex_triggers_' + (#name ?: 'all') + '_' + #limit + '_' + #offset", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_metadata"],
+        key = "@orgContextService.getActiveOrgId() + ':apex_triggers:' + (#name ?: 'all') + ':' + #limit + ':' + #offset",
+        unless = "#result == null"
+    )
     override fun getAllApexTriggers(name: String?, limit: Int, offset: Int): List<ApexTriggerDto> = fetchApexTriggersFromSalesforce(name, limit, offset)
 
-    @Cacheable(value = ["sf_metadata"], key = "'reports_' + (#name ?: 'all') + '_' + #limit + '_' + #offset", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_metadata"],
+        key = "@orgContextService.getActiveOrgId() + ':reports:' + (#name ?: 'all') + ':' + #limit + ':' + #offset",
+        unless = "#result == null"
+    )
     override fun getAllReports(name: String?, limit: Int, offset: Int): List<ReportDto> {
         var query = "SELECT Id, Name, DeveloperName, FolderName, CreatedDate, CreatedBy.Name, LastModifiedDate, LastModifiedBy.Name FROM Report "
         if (!name.isNullOrBlank()) {
@@ -157,7 +177,11 @@ class SalesforceMetadataService(
         return records
     }
 
-    @Cacheable(value = ["sf_metadata"], key = "'report_describe_' + #reportId", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_metadata"],
+        key = "@orgContextService.getActiveOrgId() + ':report_describe:' + #reportId",
+        unless = "#result == null"
+    )
     override fun getReportDescribe(reportId: String): ReportDescribeDto? {
         val safeId = reportId.trim().replace("'", "\\'")
         return executeWithToken("fetching report describe for $safeId", null) { token, instanceUrl ->
@@ -186,44 +210,48 @@ class SalesforceMetadataService(
     // --- Search methods ---
     override fun searchClasses(name: String?, limit: Int, offset: Int): List<ApexClass> {
         val pageable = PageRequest.of(offset / limit, limit, Sort.by("name").ascending())
+        val orgId = currentOrgId()
         if (!name.isNullOrBlank()) {
             val dtos = fetchApexClassesFromSalesforce(name, 200, 0)
             syncClassesToDatabase(dtos)
-        } else if (classRepository.count() == 0L) {
+        } else if (classRepository.countByOrgId(orgId) == 0L) {
             val dtos = fetchApexClassesFromSalesforce(null, 200, 0)
             syncClassesToDatabase(dtos)
         }
-        return if (name.isNullOrBlank()) classRepository.findAllProjectedBy(pageable) else classRepository.findByNameContainingIgnoreCase(name, pageable)
+        return if (name.isNullOrBlank()) classRepository.findAllByOrgId(orgId, pageable) else classRepository.findByOrgIdAndNameContainingIgnoreCase(orgId, name, pageable)
     }
 
     override fun searchTriggers(name: String?, limit: Int, offset: Int): List<ApexTrigger> {
         val pageable = PageRequest.of(offset / limit, limit, Sort.by("name").ascending())
+        val orgId = currentOrgId()
         if (!name.isNullOrBlank()) {
             val dtos = fetchApexTriggersFromSalesforce(name, 200, 0)
             syncTriggersToDatabase(dtos)
-        } else if (triggerRepository.count() == 0L) {
+        } else if (triggerRepository.countByOrgId(orgId) == 0L) {
             val dtos = fetchApexTriggersFromSalesforce(null, 200, 0)
             syncTriggersToDatabase(dtos)
         }
-        return if (name.isNullOrBlank()) triggerRepository.findAllProjectedBy(pageable) else triggerRepository.findByNameContainingIgnoreCaseOrSobjectContainingIgnoreCase(name, name, pageable)
+        return if (name.isNullOrBlank()) triggerRepository.findAllByOrgId(orgId, pageable) else triggerRepository.findByOrgIdAndNameContainingIgnoreCaseOrSobjectContainingIgnoreCase(orgId, name, pageable)
     }
 
     override fun searchDebugLevels(name: String?, limit: Int, offset: Int): List<DebugLevel> {
         val pageable = PageRequest.of(offset / limit, limit, Sort.by("developerName").ascending())
-        if (!name.isNullOrBlank()) getAllDebugLevels(name, 200, 0) else if (debugLevelRepository.count() == 0L) getAllDebugLevels(null, 200, 0)
-        return if (name.isNullOrBlank()) debugLevelRepository.findAllProjectedBy(pageable) else debugLevelRepository.findByDeveloperNameContainingIgnoreCaseOrMasterLabelContainingIgnoreCase(name, name, pageable)
+        val orgId = currentOrgId()
+        if (!name.isNullOrBlank()) getAllDebugLevels(name, 200, 0) else if (debugLevelRepository.countByOrgId(orgId) == 0L) getAllDebugLevels(null, 200, 0)
+        return if (name.isNullOrBlank()) debugLevelRepository.findAllByOrgId(orgId, pageable) else debugLevelRepository.findByOrgIdAndDeveloperNameContainingIgnoreCaseOrMasterLabelContainingIgnoreCase(orgId, name, pageable)
     }
 
     override fun searchReports(name: String?, limit: Int, offset: Int): List<Report> {
         val pageable = PageRequest.of(offset / limit, limit, Sort.by("name").ascending())
+        val orgId = currentOrgId()
         if (!name.isNullOrBlank()) {
             val dtos = getAllReports(name, 200, 0)
             syncReportsToDatabase(dtos)
-        } else if (reportRepository.count() == 0L) {
+        } else if (reportRepository.countByOrgId(orgId) == 0L) {
             val dtos = getAllReports(null, 200, 0)
             syncReportsToDatabase(dtos)
         }
-        return if (name.isNullOrBlank()) reportRepository.findAllProjectedBy(pageable) else reportRepository.findByNameContainingIgnoreCaseOrDeveloperNameContainingIgnoreCase(name, name, pageable)
+        return if (name.isNullOrBlank()) reportRepository.findAllByOrgId(orgId, pageable) else reportRepository.findByOrgIdAndNameContainingIgnoreCaseOrDeveloperNameContainingIgnoreCase(orgId, name, pageable)
     }
 
     // --- Detail & Related ---
@@ -263,50 +291,64 @@ class SalesforceMetadataService(
     }
 
     // --- Sync Methods ---
-    override fun syncDebugLevelsToDatabase(dtos: List<DebugLevelDto>) = dtos.distinctBy { it.id }.forEach { dto ->
-        val entity = debugLevelRepository.findBySfdcId(dto.id).orElse(DebugLevel(sfdcId = dto.id, developerName = dto.developerName, masterLabel = dto.masterLabel, apexCode = dto.apexCode, apexProfiling = dto.apexProfiling, callout = dto.callout, database = dto.database, system = dto.system, validation = dto.validation, visualforce = dto.visualforce, workflow = dto.workflow))
-        debugLevelRepository.save(entity.copy(developerName = dto.developerName, masterLabel = dto.masterLabel, apexCode = dto.apexCode, apexProfiling = dto.apexProfiling, callout = dto.callout, database = dto.database, system = dto.system, validation = dto.validation, visualforce = dto.visualforce, workflow = dto.workflow))
-    }
-
-    override fun syncClassesToDatabase(dtos: List<ApexClassDto>) = dtos.distinctBy { it.id }.forEach { dto ->
-        val entity = classRepository.findBySfdcId(dto.id).orElse(ApexClass(sfdcId = dto.id, name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
-        if (dto.body != null) {
-            val oldBody = minioService.downloadMetadataBody("ApexClass", dto.id)
-            if (oldBody != null && oldBody != dto.body) {
-                val history = metadataHistoryRepository.save(MetadataHistory(
-                    sfdcId = dto.id,
-                    entityType = "ApexClass",
-                    changedAt = parseSfdcDate(dto.lastModifiedDate),
-                    changedByName = dto.lastModifiedBy?.name
-                ))
-                minioService.uploadMetadataHistoryBody("ApexClass", dto.id, history.id!!, oldBody)
-            }
-            minioService.uploadMetadataBody("ApexClass", dto.id, dto.body)
+    override fun syncDebugLevelsToDatabase(dtos: List<DebugLevelDto>) {
+        val orgId = currentOrgId()
+        dtos.distinctBy { it.id }.forEach { dto ->
+            val entity = debugLevelRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(DebugLevel(orgId = orgId, sfdcId = dto.id, developerName = dto.developerName, masterLabel = dto.masterLabel, apexCode = dto.apexCode, apexProfiling = dto.apexProfiling, callout = dto.callout, database = dto.database, system = dto.system, validation = dto.validation, visualforce = dto.visualforce, workflow = dto.workflow))
+            debugLevelRepository.save(entity.copy(developerName = dto.developerName, masterLabel = dto.masterLabel, apexCode = dto.apexCode, apexProfiling = dto.apexProfiling, callout = dto.callout, database = dto.database, system = dto.system, validation = dto.validation, visualforce = dto.visualforce, workflow = dto.workflow))
         }
-        classRepository.save(entity.copy(name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
     }
 
-    override fun syncTriggersToDatabase(dtos: List<ApexTriggerDto>) = dtos.distinctBy { it.id }.forEach { dto ->
-        val entity = triggerRepository.findBySfdcId(dto.id).orElse(ApexTrigger(sfdcId = dto.id, name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
-        if (dto.body != null) {
-            val oldBody = minioService.downloadMetadataBody("ApexTrigger", dto.id)
-            if (oldBody != null && oldBody != dto.body) {
-                val history = metadataHistoryRepository.save(MetadataHistory(
-                    sfdcId = dto.id,
-                    entityType = "ApexTrigger",
-                    changedAt = parseSfdcDate(dto.lastModifiedDate),
-                    changedByName = dto.lastModifiedBy?.name
-                ))
-                minioService.uploadMetadataHistoryBody("ApexTrigger", dto.id, history.id!!, oldBody)
+    override fun syncClassesToDatabase(dtos: List<ApexClassDto>) {
+        val orgId = currentOrgId()
+        dtos.distinctBy { it.id }.forEach { dto ->
+            val entity = classRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(ApexClass(orgId = orgId, sfdcId = dto.id, name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
+            if (dto.body != null) {
+                val oldBody = minioService.downloadMetadataBody("ApexClass", dto.id)
+                if (oldBody != null && oldBody != dto.body) {
+                    val history = metadataHistoryRepository.save(MetadataHistory(
+                        orgId = orgId,
+                        sfdcId = dto.id,
+                        entityType = "ApexClass",
+                        changedAt = parseSfdcDate(dto.lastModifiedDate),
+                        changedByName = dto.lastModifiedBy?.name
+                    ))
+                    minioService.uploadMetadataHistoryBody("ApexClass", dto.id, history.id!!, oldBody)
+                }
+                minioService.uploadMetadataBody("ApexClass", dto.id, dto.body)
             }
-            minioService.uploadMetadataBody("ApexTrigger", dto.id, dto.body)
+            classRepository.save(entity.copy(name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
         }
-        triggerRepository.save(entity.copy(name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
     }
 
-    override fun syncReportsToDatabase(dtos: List<ReportDto>) = dtos.distinctBy { it.id }.forEach { dto ->
-        val entity = reportRepository.findBySfdcId(dto.id).orElse(Report(sfdcId = dto.id, name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
-        reportRepository.save(entity.copy(name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
+    override fun syncTriggersToDatabase(dtos: List<ApexTriggerDto>) {
+        val orgId = currentOrgId()
+        dtos.distinctBy { it.id }.forEach { dto ->
+            val entity = triggerRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(ApexTrigger(orgId = orgId, sfdcId = dto.id, name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
+            if (dto.body != null) {
+                val oldBody = minioService.downloadMetadataBody("ApexTrigger", dto.id)
+                if (oldBody != null && oldBody != dto.body) {
+                    val history = metadataHistoryRepository.save(MetadataHistory(
+                        orgId = orgId,
+                        sfdcId = dto.id,
+                        entityType = "ApexTrigger",
+                        changedAt = parseSfdcDate(dto.lastModifiedDate),
+                        changedByName = dto.lastModifiedBy?.name
+                    ))
+                    minioService.uploadMetadataHistoryBody("ApexTrigger", dto.id, history.id!!, oldBody)
+                }
+                minioService.uploadMetadataBody("ApexTrigger", dto.id, dto.body)
+            }
+            triggerRepository.save(entity.copy(name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
+        }
+    }
+
+    override fun syncReportsToDatabase(dtos: List<ReportDto>) {
+        val orgId = currentOrgId()
+        dtos.distinctBy { it.id }.forEach { dto ->
+            val entity = reportRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(Report(orgId = orgId, sfdcId = dto.id, name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
+            reportRepository.save(entity.copy(name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
+        }
     }
 
     private fun mapTriggerEvents(dto: ApexTriggerDto) = listOfNotNull(if (dto.usageBeforeInsert == true) "Before Insert" else null, if (dto.usageBeforeUpdate == true) "Before Update" else null, if (dto.usageBeforeDelete == true) "Before Delete" else null, if (dto.usageAfterInsert == true) "After Insert" else null, if (dto.usageAfterUpdate == true) "After Update" else null, if (dto.usageAfterDelete == true) "After Delete" else null, if (dto.usageAfterUndelete == true) "After Undelete" else null)

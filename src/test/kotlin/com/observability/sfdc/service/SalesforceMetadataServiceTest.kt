@@ -25,6 +25,7 @@ class SalesforceMetadataServiceTest {
     private lateinit var classRepository: ApexClassRepository
     private lateinit var triggerRepository: ApexTriggerRepository
     private lateinit var debugLevelRepository: DebugLevelRepository
+    private lateinit var orgContextService: OrgContextService
     private lateinit var service: SalesforceMetadataService
 
     // Helpers to avoid NPE with Kotlin non-nullable parameters
@@ -37,7 +38,9 @@ class SalesforceMetadataServiceTest {
         classRepository = mock(ApexClassRepository::class.java)
         triggerRepository = mock(ApexTriggerRepository::class.java)
         debugLevelRepository = mock(DebugLevelRepository::class.java)
-        //service = spy(SalesforceMetadataService(authService, classRepository, triggerRepository, debugLevelRepository, "v60.0"))
+        orgContextService = mock(OrgContextService::class.java)
+        `when`(orgContextService.getActiveOrgId()).thenReturn("00D000000000001")
+        //service = spy(SalesforceMetadataService(authService, classRepository, triggerRepository, debugLevelRepository, metadataHistoryRepository, reportRepository, reportToSoqlConverter, minioService, orgContextService, "v60.0"))
     }
 
     @Test
@@ -57,7 +60,7 @@ class SalesforceMetadataServiceTest {
                 anyBoolean()
             )
         
-        `when`(classRepository.findBySfdcId(anyString())).thenReturn(Optional.empty())
+        `when`(classRepository.findByOrgIdAndSfdcId(anyString(), anyString())).thenReturn(Optional.empty())
 
         // Act
         val result = service.getAllApexClasses()
@@ -89,7 +92,7 @@ class SalesforceMetadataServiceTest {
                 anyBoolean()
             )
         
-        `when`(triggerRepository.findBySfdcId(anyString())).thenReturn(Optional.empty())
+        `when`(triggerRepository.findByOrgIdAndSfdcId(anyString(), anyString())).thenReturn(Optional.empty())
 
         // Act
         val result = service.getAllApexTriggers()

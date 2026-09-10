@@ -6,6 +6,6 @@ import org.springframework.stereotype.Repository
 
 @Repository
 interface TraceJobRepository : JpaRepository<TraceJob, Long> {
-    fun findByStatus(status: String): List<TraceJob>
-    fun findByTracedEntityNameContainingIgnoreCase(name: String): List<TraceJob>
+    fun findByOrgIdAndStatus(orgId: String, status: String): List<TraceJob>
+    fun findByOrgIdAndTracedEntityNameContainingIgnoreCase(orgId: String, name: String): List<TraceJob>
 }
