@@ -32,7 +32,7 @@ class SalesforceUserService(
     )
     @Transactional
     override fun getAllUsers(name: String?, limit: Int, offset: Int): List<SalesforceUserDto> {
-        var query = "SELECT Id, Name, Username, Email, Profile.Name, IsActive, Entity__c FROM User WHERE IsActive = TRUE "
+        var query = "SELECT Id, Name, Username, Email, Profile.Name, IsActive FROM User WHERE IsActive = TRUE "
         if (!name.isNullOrBlank()) {
             val escapedName = name.replace("'", "\\'")
             query += "AND (Name LIKE '%$escapedName%' OR Name = 'Automated Process') "

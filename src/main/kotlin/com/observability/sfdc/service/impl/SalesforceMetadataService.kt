@@ -73,19 +73,15 @@ class SalesforceMetadataService(
         return "WHERE Status = 'Active' "
     }
 
-    override fun countApexClassesFromSalesforce(): Int {
-        val query = "SELECT COUNT() FROM ApexClass ${buildClassWhereClause()}"
-        return executeWithToken("counting ApexClasses", 0) { token, instanceUrl ->
-            val uri = buildUri(instanceUrl, "query").queryParam("q", query).build().toUri()
-            val entity = HttpEntity<Unit>(createHeaders(token))
-            val response = restTemplate.exchange(uri, HttpMethod.GET, entity, object : ParameterizedTypeReference<SalesforceQueryResult<Map<String, Any>>>() {})
-            response.body?.totalSize ?: 0
-        }
-    }
+    override fun countApexClassesFromSalesforce(): Int =
+        countSalesforceRecords("ApexClass", buildClassWhereClause())
 
-    override fun countApexTriggersFromSalesforce(): Int {
-        val query = "SELECT COUNT() FROM ApexTrigger ${buildTriggerWhereClause()}"
-        return executeWithToken("counting ApexTriggers", 0) { token, instanceUrl ->
+    override fun countApexTriggersFromSalesforce(): Int =
+        countSalesforceRecords("ApexTrigger", buildTriggerWhereClause())
+
+    private fun countSalesforceRecords(objectType: String, whereClause: String): Int {
+        val query = "SELECT COUNT() FROM $objectType $whereClause"
+        return executeWithToken("counting $objectType", 0) { token, instanceUrl ->
             val uri = buildUri(instanceUrl, "query").queryParam("q", query).build().toUri()
             val entity = HttpEntity<Unit>(createHeaders(token))
             val response = restTemplate.exchange(uri, HttpMethod.GET, entity, object : ParameterizedTypeReference<SalesforceQueryResult<Map<String, Any>>>() {})
@@ -303,20 +299,7 @@ class SalesforceMetadataService(
         val orgId = currentOrgId()
         dtos.distinctBy { it.id }.forEach { dto ->
             val entity = classRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(ApexClass(orgId = orgId, sfdcId = dto.id, name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
-            if (dto.body != null) {
-                val oldBody = minioService.downloadMetadataBody("ApexClass", dto.id)
-                if (oldBody != null && oldBody != dto.body) {
-                    val history = metadataHistoryRepository.save(MetadataHistory(
-                        orgId = orgId,
-                        sfdcId = dto.id,
-                        entityType = "ApexClass",
-                        changedAt = parseSfdcDate(dto.lastModifiedDate),
-                        changedByName = dto.lastModifiedBy?.name
-                    ))
-                    minioService.uploadMetadataHistoryBody("ApexClass", dto.id, history.id!!, oldBody)
-                }
-                minioService.uploadMetadataBody("ApexClass", dto.id, dto.body)
-            }
+            syncMetadataBody("ApexClass", dto.id, orgId, dto.body, dto.lastModifiedDate, dto.lastModifiedBy?.name)
             classRepository.save(entity.copy(name = dto.name, apiVersion = dto.apiVersion, status = dto.status, lengthWithoutComments = dto.lengthWithoutComments, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
         }
     }
@@ -325,20 +308,7 @@ class SalesforceMetadataService(
         val orgId = currentOrgId()
         dtos.distinctBy { it.id }.forEach { dto ->
             val entity = triggerRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(ApexTrigger(orgId = orgId, sfdcId = dto.id, name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
-            if (dto.body != null) {
-                val oldBody = minioService.downloadMetadataBody("ApexTrigger", dto.id)
-                if (oldBody != null && oldBody != dto.body) {
-                    val history = metadataHistoryRepository.save(MetadataHistory(
-                        orgId = orgId,
-                        sfdcId = dto.id,
-                        entityType = "ApexTrigger",
-                        changedAt = parseSfdcDate(dto.lastModifiedDate),
-                        changedByName = dto.lastModifiedBy?.name
-                    ))
-                    minioService.uploadMetadataHistoryBody("ApexTrigger", dto.id, history.id!!, oldBody)
-                }
-                minioService.uploadMetadataBody("ApexTrigger", dto.id, dto.body)
-            }
+            syncMetadataBody("ApexTrigger", dto.id, orgId, dto.body, dto.lastModifiedDate, dto.lastModifiedBy?.name)
             triggerRepository.save(entity.copy(name = dto.name, sobject = dto.tableEnumOrId, apiVersion = dto.apiVersion, status = dto.status, usageBeforeInsert = dto.usageBeforeInsert, usageBeforeUpdate = dto.usageBeforeUpdate, usageBeforeDelete = dto.usageBeforeDelete, usageAfterInsert = dto.usageAfterInsert, usageAfterUpdate = dto.usageAfterUpdate, usageAfterDelete = dto.usageAfterDelete, usageAfterUndelete = dto.usageAfterUndelete, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, numLinesCovered = dto.coverage?.numLinesCovered, numLinesUncovered = dto.coverage?.numLinesUncovered))
         }
     }
@@ -349,6 +319,20 @@ class SalesforceMetadataService(
             val entity = reportRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(Report(orgId = orgId, sfdcId = dto.id, name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
             reportRepository.save(entity.copy(name = dto.name, developerName = dto.developerName, folderName = dto.folderName, createdDate = dto.createdDate, createdByName = dto.createdBy?.name, lastModifiedDate = dto.lastModifiedDate, lastModifiedByName = dto.lastModifiedBy?.name))
         }
+    }
+
+    private fun syncMetadataBody(entityType: String, sfdcId: String, orgId: String, body: String?, lastModifiedDate: String?, lastModifiedByName: String?) {
+        if (body == null) return
+        val oldBody = minioService.downloadMetadataBody(entityType, sfdcId)
+        if (oldBody != null && oldBody != body) {
+            val history = metadataHistoryRepository.save(MetadataHistory(
+                orgId = orgId, sfdcId = sfdcId, entityType = entityType,
+                changedAt = parseSfdcDate(lastModifiedDate),
+                changedByName = lastModifiedByName
+            ))
+            minioService.uploadMetadataHistoryBody(entityType, sfdcId, history.id!!, oldBody)
+        }
+        minioService.uploadMetadataBody(entityType, sfdcId, body)
     }
 
     private fun mapTriggerEvents(dto: ApexTriggerDto) = listOfNotNull(if (dto.usageBeforeInsert == true) "Before Insert" else null, if (dto.usageBeforeUpdate == true) "Before Update" else null, if (dto.usageBeforeDelete == true) "Before Delete" else null, if (dto.usageAfterInsert == true) "After Insert" else null, if (dto.usageAfterUpdate == true) "After Update" else null, if (dto.usageAfterDelete == true) "After Delete" else null, if (dto.usageAfterUndelete == true) "After Undelete" else null)
