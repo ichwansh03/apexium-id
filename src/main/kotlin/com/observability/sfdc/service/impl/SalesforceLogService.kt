@@ -7,6 +7,7 @@ import com.observability.sfdc.exception.ValidationException
 import com.observability.sfdc.repository.DebugLevelRepository
 import com.observability.sfdc.repository.LogRepository
 import com.observability.sfdc.service.ApexLogService
+import com.observability.sfdc.service.OrgContextService
 import com.observability.sfdc.service.TraceFlagService
 import com.observability.sfdc.service.SalesforceBaseService
 import org.springframework.beans.factory.annotation.Value
@@ -28,6 +29,7 @@ class SalesforceLogService(
     private val debugLevelRepository: DebugLevelRepository,
     private val logRepository: LogRepository,
     private val minioService: MinioService,
+    private val orgContextService: OrgContextService,
     @Value($$"${salesforce.api-version}") apiVersion: String
 ) : SalesforceBaseService(authService, apiVersion), ApexLogService, TraceFlagService {
     private val salesforceIdRegex = Regex("^[a-zA-Z0-9]{15}(?:[a-zA-Z0-9]{3})?$")
@@ -36,6 +38,7 @@ class SalesforceLogService(
         restTemplate.requestFactory = JdkClientHttpRequestFactory()
     }
 
+    private fun currentOrgId(): String = orgContextService.getActiveOrgId()
     private fun isValidSalesforceId(id: String): Boolean = salesforceIdRegex.matches(id)
     private val sfdcFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss'Z'")
 
@@ -47,7 +50,7 @@ class SalesforceLogService(
 
         // Enrich records with Apex Class Name by checking DB first, then fetching body from MinIO
         return records.map { dto ->
-            val dbLog = logRepository.findBySfdcId(dto.id)
+            val dbLog = logRepository.findByOrgIdAndSfdcId(currentOrgId(), dto.id)
             val className = dbLog.get().apexClassName ?: run {
                 val body = getLogBody(dto.id)
                 extractClassName(body)
@@ -116,7 +119,8 @@ class SalesforceLogService(
 
     override fun createTraceFlag(frontendRequest: FrontendTraceFlagRequest): SalesforceCreateResponse? {
         // Resolve DebugLevel ID
-        val debugLevels = debugLevelRepository.findAll()
+        val orgId = currentOrgId()
+        val debugLevels = debugLevelRepository.findAll().filter { it.orgId == orgId }
         val debugLevel = debugLevels.find { it.developerName == frontendRequest.debugLevelName || it.masterLabel == frontendRequest.debugLevelName }
             ?: throw ResourceNotFoundException(
                 "DebugLevel '${frontendRequest.debugLevelName}' not found. Please sync metadata first.",
@@ -175,7 +179,7 @@ class SalesforceLogService(
 
         // 2. Cleanup local storage and database
         minioService.deleteLog(id)
-        logRepository.deleteBySfdcId(id)
+        logRepository.deleteByOrgIdAndSfdcId(currentOrgId(), id)
         
         return deletedFromSF
     }

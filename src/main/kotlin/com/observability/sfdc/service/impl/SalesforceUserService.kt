@@ -4,6 +4,7 @@ import com.observability.sfdc.domain.User
 import com.observability.sfdc.dto.SalesforceQueryResult
 import com.observability.sfdc.dto.SalesforceUserDto
 import com.observability.sfdc.repository.UserRepository
+import com.observability.sfdc.service.OrgContextService
 import com.observability.sfdc.service.SalesforceBaseService
 import com.observability.sfdc.service.UserService
 import org.springframework.beans.factory.annotation.Value
@@ -18,10 +19,17 @@ import org.springframework.transaction.annotation.Transactional
 class SalesforceUserService(
     authService: SalesforceAuthService,
     private val userRepository: UserRepository,
+    private val orgContextService: OrgContextService,
     @Value($$"${salesforce.api-version}") apiVersion: String
 ) : SalesforceBaseService(authService, apiVersion), UserService {
 
-    @Cacheable(value = ["sf_users"], key = "'all_users_' + (#name ?: 'all') + '_' + #limit + '_' + #offset", unless = "#result == null")
+    private fun currentOrgId(): String = orgContextService.getActiveOrgId()
+
+    @Cacheable(
+        value = ["sf_users"],
+        key = "@orgContextService.getActiveOrgId() + ':all_users:' + (#name ?: 'all') + ':' + #limit + ':' + #offset",
+        unless = "#result == null"
+    )
     @Transactional
     override fun getAllUsers(name: String?, limit: Int, offset: Int): List<SalesforceUserDto> {
         var query = "SELECT Id, Name, Username, Email, Profile.Name, IsActive, Entity__c FROM User WHERE IsActive = TRUE "
@@ -38,16 +46,20 @@ class SalesforceUserService(
 
     override fun searchUsers(name: String?, limit: Int, offset: Int): List<User> {
         val pageable = PageRequest.of(offset / limit, limit, Sort.by("name").ascending())
+        val orgId = currentOrgId()
         if (!name.isNullOrBlank()) getAllUsers(name = name, limit = 200)
-        else if (userRepository.count() == 0L) getAllUsers(limit = 200)
+        else if (userRepository.countByOrgId(orgId) == 0L) getAllUsers(limit = 200)
         
-        return if (name.isNullOrBlank()) userRepository.findAllProjectedBy(pageable)
-               else userRepository.findByNameContainingIgnoreCase(name, pageable)
+        return if (name.isNullOrBlank()) userRepository.findAllByOrgId(orgId, pageable)
+               else userRepository.findByOrgIdAndNameContainingIgnoreCase(orgId, name, pageable)
     }
 
     @Transactional
-    private fun syncUsersToDatabase(dtos: List<SalesforceUserDto>) = dtos.forEach { dto ->
-        val entity = userRepository.findBySfdcId(dto.id).orElse(User(sfdcId = dto.id, name = dto.name, username = dto.username, email = dto.email, profileName = dto.profile?.name, isActive = dto.isActive, entity = dto.entity))
-        userRepository.save(entity.copy(name = dto.name, username = dto.username, email = dto.email, profileName = dto.profile?.name, isActive = dto.isActive, entity = dto.entity))
+    private fun syncUsersToDatabase(dtos: List<SalesforceUserDto>) {
+        val orgId = currentOrgId()
+        dtos.forEach { dto ->
+            val entity = userRepository.findByOrgIdAndSfdcId(orgId, dto.id).orElse(User(orgId = orgId, sfdcId = dto.id, name = dto.name, username = dto.username, email = dto.email, profileName = dto.profile?.name, isActive = dto.isActive, entity = dto.entity))
+            userRepository.save(entity.copy(name = dto.name, username = dto.username, email = dto.email, profileName = dto.profile?.name, isActive = dto.isActive, entity = dto.entity))
+        }
     }
 }

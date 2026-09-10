@@ -10,6 +10,9 @@ data class TraceJob(
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     val id: Long? = null,
 
+    @Column(name = "org_id", nullable = true, columnDefinition = "VARCHAR(18) DEFAULT 'UNKNOWN'")
+    val orgId: String?,
+
     @Column(name = "traced_entity_id", nullable = false)
     val tracedEntityId: String,
 

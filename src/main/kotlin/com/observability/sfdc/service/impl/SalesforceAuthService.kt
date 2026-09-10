@@ -2,6 +2,7 @@ package com.observability.sfdc.service.impl
 
 import com.observability.sfdc.dto.SalesforceTokenResponse
 import com.observability.sfdc.service.AuthService
+import com.observability.sfdc.service.OrgContextService
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.cache.annotation.Cacheable
@@ -15,6 +16,7 @@ import org.springframework.web.client.RestTemplate
 
 @Service
 class SalesforceAuthService(
+    private val orgContextService: OrgContextService,
     @Value($$"${salesforce.login-url}") private val loginUrl: String,
     @Value($$"${salesforce.client-id}") private val clientId: String,
     @Value($$"${salesforce.client-secret}") private val clientSecret: String,
@@ -23,7 +25,11 @@ class SalesforceAuthService(
     private val restTemplate = RestTemplate()
     private val logger = LoggerFactory.getLogger(SalesforceAuthService::class.java)
 
-    @Cacheable(value = ["sf_tokens"], key = "'client_credentials_token'", unless = "#result == null")
+    @Cacheable(
+        value = ["sf_tokens"],
+        key = "@orgContextService.getActiveOrgId() + ':token'",
+        unless = "#result == null"
+    )
     override fun getAccessToken(): SalesforceTokenResponse? {
         val url = "$loginUrl/services/oauth2/token"
         
@@ -53,6 +59,7 @@ class SalesforceAuthService(
                 return null
             }
             logger.info("Successfully authenticated with Salesforce.")
+            orgContextService.ensureActiveOrg(response)
             response
         } catch (e: Exception) {
             logger.error("Error authenticating with Salesforce: ${e.message}")

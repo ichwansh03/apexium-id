@@ -9,11 +9,12 @@ import java.util.*
 
 @Repository
 interface LogRepository : JpaRepository<Log, Long> {
-    fun findBySfdcId(sfdcId: String): Optional<Log>
-    fun deleteBySfdcId(sfdcId: String)
-    fun findAllByOrderByRequestTimeDesc(pageable: Pageable): List<Log>
-    fun findByApexClassNameContainingIgnoreCase(apexClassName: String, pageable: Pageable): List<Log>
-    fun findByAuthorNameContainingIgnoreCase(authorName: String, pageable: Pageable): List<Log>
-    fun findByApexClassNameContainingIgnoreCaseAndAuthorNameContainingIgnoreCase(apexClassName: String, authorName: String, pageable: Pageable): List<Log>
-    fun deleteByRequestTimeBefore(cutoff: Instant): Int
+    fun findByOrgIdAndSfdcId(orgId: String, sfdcId: String): Optional<Log>
+    fun deleteByOrgIdAndSfdcId(orgId: String, sfdcId: String)
+    fun findAllByOrgIdOrderByRequestTimeDesc(orgId: String, pageable: Pageable): List<Log>
+    fun findByOrgIdAndApexClassNameContainingIgnoreCase(orgId: String, apexClassName: String, pageable: Pageable): List<Log>
+    fun findByOrgIdAndAuthorNameContainingIgnoreCase(orgId: String, authorName: String, pageable: Pageable): List<Log>
+    fun findByOrgIdAndApexClassNameContainingIgnoreCaseAndAuthorNameContainingIgnoreCase(orgId: String, apexClassName: String, authorName: String, pageable: Pageable): List<Log>
+    fun deleteByOrgIdAndRequestTimeBefore(orgId: String, cutoff: Instant): Int
+    fun existsByOrgIdAndSfdcId(orgId: String, sfdcId: String): Boolean
 }

@@ -3,6 +3,7 @@ package com.observability.sfdc.service.impl
 import com.observability.sfdc.domain.Log
 import com.observability.sfdc.repository.LogRepository
 import com.observability.sfdc.service.ApexLogService
+import com.observability.sfdc.service.OrgContextService
 import org.slf4j.LoggerFactory
 import org.springframework.scheduling.annotation.Scheduled
 import org.springframework.stereotype.Service
@@ -14,7 +15,8 @@ import java.time.format.DateTimeFormatter
 @Service
 class SalesforceLogPollingService(
     private val apexLogService: ApexLogService,
-    private val logRepository: LogRepository
+    private val logRepository: LogRepository,
+    private val orgContextService: OrgContextService
 ) {
     private val logger = LoggerFactory.getLogger(SalesforceLogPollingService::class.java)
     private val dateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm:ss.SSSZ")
@@ -24,18 +26,24 @@ class SalesforceLogPollingService(
     fun pollLogs() {
         logger.info("Starting Salesforce log polling cycle...")
         try {
+            val orgId = orgContextService.getActiveOrgId()
+            if (orgId == "UNKNOWN_ORG") {
+                logger.info("No active org configured. Skipping log poll.")
+                return
+            }
             // Fetch logs without bodies first to check against database
             val logs = apexLogService.queryApexLogs(limit = 20, fetchBody = false)
             logger.info("Retrieved ${logs.size} log headers from Salesforce.")
             
             var newLogsCount = 0
             logs.forEach { dto ->
-                if (!logRepository.findBySfdcId(dto.id).isPresent) {
+                if (!logRepository.existsByOrgIdAndSfdcId(orgId, dto.id)) {
                     // Fetch body from MinIO/SF, extract className, store body in MinIO only
                     val body = apexLogService.getLogBody(dto.id)
                     val apexClassName = dto.apexClassName ?: apexLogService.extractClassName(body)
 
                     val log = Log(
+                        orgId = orgId,
                         sfdcId = dto.id,
                         apexClassName = apexClassName,
                         authorName = dto.logUser?.name,

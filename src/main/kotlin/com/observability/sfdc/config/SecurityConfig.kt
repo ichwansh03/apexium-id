@@ -36,6 +36,7 @@ class SecurityConfig(
                 auth
                     .requestMatchers(HttpMethod.GET, "/actuator/health").permitAll()
                     .requestMatchers("/actuator/**").authenticated()
+                    .requestMatchers("/admin/**").authenticated()
                 if (apiKey.isNotBlank()) {
                     auth.requestMatchers("/api/sfdc/**").authenticated()
                 } else {
