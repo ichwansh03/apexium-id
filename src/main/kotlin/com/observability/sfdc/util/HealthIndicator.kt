@@ -1,16 +1,16 @@
 package com.observability.sfdc.util
 
 import org.springframework.boot.health.contributor.Health
-import org.springframework.boot.health.contributor.HealthIndicator
+import org.springframework.boot.health.contributor.HealthIndicator as SpringHealthIndicator
 import org.springframework.data.redis.connection.RedisConnectionFactory
 import org.springframework.stereotype.Component
 import javax.sql.DataSource
 
-@Component
-class HealthIndicator(
+@Component("appHealthIndicator")
+class AppHealthIndicator(
     private val dataSource: DataSource,
     private val redisConnectionFactory: RedisConnectionFactory
-) : HealthIndicator {
+) : SpringHealthIndicator {
 
     override fun health(): Health {
         val builder = Health.up()
